@@ -19,6 +19,14 @@
   ],
   "author": "crazybyte",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/StayPirate/opencode-total-session-cost.git"
+  },
+  "bugs": {
+    "url": "https://github.com/StayPirate/opencode-total-session-cost/issues"
+  },
+  "homepage": "https://github.com/StayPirate/opencode-total-session-cost#readme",
   "dependencies": {
     "@opencode-ai/plugin": "^1.18.30",
     "@opencode-ai/sdk": "^1.18.30"
