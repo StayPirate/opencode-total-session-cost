@@ -1,0 +1,30 @@
+# Opencode Total Session Cost Tracker 💰
+
+A real-time, lightweight plugin for [Opencode](https://opencode.im) that tracks and displays the **actual cumulative cost** of your active session, including all background tasks, sub-agents, and child sessions.
+
+## Why this plugin?
+By default, Opencode only displays the cost of your active main session. However, any background tasks or specialized sub-agents (like `explore`, `coder`, or custom test executors) invoked during your conversation run in their own child sub-sessions, keeping their costs hidden.
+
+Without tracking these sub-sessions, you might see a main session cost of a few cents, while the background agents have spent significantly more.
+
+**This plugin solves that.** It automatically aggregates the costs of your main session and all its nested child tasks, displaying your **real, total spending** in real-time directly inside the main session.
+
+## Features
+- **Sidebar-Independent**: The cost indicator stays visible even when the Opencode sidebar is closed.
+- **Recursive Sub-Agent Tracking**: Automatically detects and sums up the costs of all child tasks spawned during your session.
+- **Detailed Cost Breakdown**: Offers a `/total_cost` slash command to show a detailed popup separating your active session cost from child sub-agent costs.
+
+## Installation
+Once published, you can install it globally with:
+```bash
+opencode plugin opencode-total-session-cost -g
+```
+
+## How it works
+The plugin runs inside Opencode's TUI framework, recursively fetching session data:
+1. It reads the core cost of your active session.
+2. It recursively queries all child sub-sessions spawned by sub-agents.
+3. It displays the combined sum dynamically in the TUI.
+
+## License
+MIT

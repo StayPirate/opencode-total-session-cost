@@ -1,0 +1,36 @@
+{
+  "name": "opencode-total-session-cost",
+  "version": "1.0.0",
+  "description": "Real-time cumulative cost tracker for Opencode sessions, aggregating costs from parent sessions, archived messages, and all child sub-agent tasks.",
+  "type": "module",
+  "main": "./index.ts",
+  "exports": {
+    ".": "./index.ts",
+    "./tui": "./tui.tsx"
+  },
+  "keywords": [
+    "opencode-plugin",
+    "opencode",
+    "tui",
+    "cost",
+    "token",
+    "subagent",
+    "cumulative-cost"
+  ],
+  "author": "crazybyte",
+  "license": "MIT",
+  "dependencies": {
+    "@opencode-ai/plugin": "^1.4.3",
+    "@opencode-ai/sdk": "^1.4.3"
+  },
+  "peerDependencies": {
+    "@opentui/core": ">=0.1.97",
+    "@opentui/solid": ">=0.1.97",
+    "solid-js": "^1.8.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.2",
+    "solid-js": "^1.8.0",
+    "@types/node": "^22.13.9"
+  }
+}
