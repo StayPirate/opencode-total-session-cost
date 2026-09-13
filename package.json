@@ -1,6 +1,6 @@
 {
   "name": "opencode-total-session-cost",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Real-time cumulative cost tracker for Opencode sessions, aggregating costs from parent sessions, archived messages, and all child sub-agent tasks.",
   "type": "module",
   "main": "./index.ts",
