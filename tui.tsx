@@ -55,8 +55,8 @@ export const SessionCostPlugin: TuiPlugin = async (api) => {
         update();
 
         return (
-          <text fg="green">
-            {" "}Total: ${total().toFixed(2)}
+          <text fg="gray">
+            {" "}[ ${total().toFixed(2)} ]
           </text>
         );
       }
