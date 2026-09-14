@@ -4,6 +4,102 @@ import { createSignal, onCleanup } from "solid-js";
 export const id = "opencode-cost-bar";
 
 export const SessionCostPlugin: TuiPlugin = async (api) => {
+  const showCostBreakdown = async (sessionID: string) => {
+    let parentCost = 0;
+    let taskCost = 0;
+    let subagentCost = 0;
+
+    const modelCosts: Record<string, number> = {};
+
+    const addModelCost = (providerID: string, modelID: string, cost: number) => {
+      const key = `${providerID}/${modelID}`;
+      modelCosts[key] = (modelCosts[key] || 0) + cost;
+    };
+
+    const calculateCostRecursive = async (currID: string, fallbackSession?: any): Promise<void> => {
+      const sessionObj = api.state.session.get(currID) || fallbackSession;
+      let sessionCost = 0;
+      if (sessionObj && typeof sessionObj.cost === "number") {
+        sessionCost = sessionObj.cost;
+        if (currID === sessionID) {
+          parentCost += sessionCost;
+        } else if (sessionObj.agent === "explore") {
+          taskCost += sessionCost;
+        } else {
+          subagentCost += sessionCost;
+        }
+      }
+
+      let messagesAttributedCost = 0;
+      try {
+        const msgRes = await api.client.session.messages({ sessionID: currID });
+        if (msgRes.data) {
+          for (const item of msgRes.data) {
+            const msg = item.info as any;
+            if (msg && msg.role === "assistant" && typeof msg.cost === "number" && msg.cost > 0) {
+              const provider = msg.providerID || (sessionObj?.model?.providerID) || "unknown";
+              const model = msg.modelID || (sessionObj?.model?.id) || "unknown";
+              addModelCost(provider, model, msg.cost);
+              messagesAttributedCost += msg.cost;
+            }
+          }
+        }
+      } catch (err) {}
+
+      const remainder = sessionCost - messagesAttributedCost;
+      if (remainder > 0.0001) {
+        const provider = (sessionObj?.model?.providerID) || "unknown";
+        const model = (sessionObj?.model?.id) || "unknown";
+        addModelCost(provider, model, remainder);
+      }
+
+      try {
+        const childrenRes = await api.client.session.children({ sessionID: currID });
+        if (childrenRes.data) {
+          for (const child of childrenRes.data) {
+            await calculateCostRecursive(child.id, child);
+          }
+        }
+      } catch (err) {}
+    };
+
+    await calculateCostRecursive(sessionID);
+    const total = parentCost + taskCost + subagentCost;
+
+    // Format Session breakdown
+    const sessionSection = `By session\nSession:   $${parentCost.toFixed(2)}\nTask:      $${taskCost.toFixed(2)}\nSub-agent: $${subagentCost.toFixed(2)}\n---------------\nTotal:     $${total.toFixed(2)}`;
+
+    // Format Model breakdown
+    let maxLabelLength = 6; // Length of "Total:" is 6
+    for (const key of Object.keys(modelCosts)) {
+      const label = `${key}:`;
+      if (label.length > maxLabelLength) {
+        maxLabelLength = label.length;
+      }
+    }
+
+    const sortedModels = Object.entries(modelCosts).sort((a, b) => b[1] - a[1]);
+    const modelLines: string[] = [];
+    for (const [key, cost] of sortedModels) {
+      const label = `${key}:`;
+      const paddedLabel = label.padEnd(maxLabelLength + 1, " ");
+      modelLines.push(`${paddedLabel}$${cost.toFixed(2)}`);
+    }
+
+    const modelSeparator = "-".repeat(maxLabelLength + 7);
+    const paddedTotalLabel = "Total:".padEnd(maxLabelLength + 1, " ");
+    const modelTotalLine = `${paddedTotalLabel}$${total.toFixed(2)}`;
+
+    const modelSection = `By provider/model\n${modelLines.join("\n")}\n${modelSeparator}\n${modelTotalLine}`;
+
+    api.ui.toast({
+      title: "Session Costs Breakdown",
+      message: `${sessionSection}\n\n${modelSection}`,
+      variant: "success",
+      duration: 10000
+    });
+  };
+
   // Register TUI slots with reactive signals defined inside the renderers
   api.slots?.register({
     slots: {
@@ -55,7 +151,14 @@ export const SessionCostPlugin: TuiPlugin = async (api) => {
         update();
 
         return (
-          <text fg="gray">
+          <text
+            fg="gray"
+            onMouseUp={(e: any) => {
+              if (props?.session_id && e.button === 0) {
+                showCostBreakdown(props.session_id);
+              }
+            }}
+          >
             {" "}[ ${total().toFixed(2)} ]
           </text>
         );
@@ -89,38 +192,7 @@ export const SessionCostPlugin: TuiPlugin = async (api) => {
           return;
         }
 
-        let parentCost = 0;
-        let childrenCost = 0;
-
-        const calculateCostRecursive = async (sessionID: string): Promise<void> => {
-          const sessionObj = api.state.session.get(sessionID);
-          if (sessionObj && typeof sessionObj.cost === "number") {
-            if (sessionID === currentSessionID) {
-              parentCost += sessionObj.cost;
-            } else {
-              childrenCost += sessionObj.cost;
-            }
-          }
-
-          try {
-            const childrenRes = await api.client.session.children({ sessionID });
-            if (childrenRes.data) {
-              for (const child of childrenRes.data) {
-                await calculateCostRecursive(child.id);
-              }
-            }
-          } catch (err) {}
-        };
-
-        await calculateCostRecursive(currentSessionID);
-        const total = parentCost + childrenCost;
-
-        api.ui.toast({
-          title: "Session Costs Breakdown",
-          message: `Active: $${parentCost.toFixed(2)} | Children: $${childrenCost.toFixed(2)} | Total: $${total.toFixed(2)}`,
-          variant: "success",
-          duration: 6000
-        });
+        await showCostBreakdown(currentSessionID);
       }
     }
   ]);
