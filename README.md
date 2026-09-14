@@ -19,8 +19,8 @@ Without tracking these sub-sessions, you might see a main session cost of a few 
 ## Features
 - **Sidebar-Independent**: The cost indicator stays visible even when the Opencode sidebar is closed.
 - **Recursive Sub-Agent Tracking**: Automatically detects and sums up the costs of all child tasks spawned during your session.
-- **Detailed Cost Breakdown**: Offers a `/total_cost` slash command (aliased to `/costs` and `/cost`) to show a detailed popup separating your active session cost from child task and sub-agent costs.
-- **Provider & Model Breakdown**: Displays the exact costs accumulated per model across all session hierarchy levels (formatted as `provider/model`), sorted by highest spending.
+- **Detailed Cost Breakdown**: Offers a `/total_cost` slash command to show a detailed popup separating your active session cost from child task and sub-agent costs.
+- **Provider & Model Breakdown**: Displays the exact costs accumulated per model across all session hierarchy levels.
 - **Mouse Click Interaction**: Left-clicking on the cost bar in the prompt header right panel triggers the same detailed breakdown popup.
 
 ## Installation
