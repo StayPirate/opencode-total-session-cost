@@ -1,5 +1,12 @@
 # Opencode Total Session Cost Tracker 💰
 
+[![npm version](https://img.shields.io/npm/v/opencode-total-session-cost.svg?logo=npm&color=CB3837)](https://www.npmjs.com/package/opencode-total-session-cost)
+[![npm downloads](https://img.shields.io/npm/dm/opencode-total-session-cost.svg?logo=npm&color=51a822)](https://www.npmjs.com/package/opencode-total-session-cost)
+[![npm provenance](https://img.shields.io/badge/provenance-signed-blue?logo=sigstore&color=007ec6)](https://www.npmjs.com/package/opencode-total-session-cost)
+[![CI Status](https://github.com/StayPirate/opencode-total-session-cost/actions/workflows/ci.yml/badge.svg)](https://github.com/StayPirate/opencode-total-session-cost/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/StayPirate/opencode-total-session-cost)
+[![GitHub stars](https://img.shields.io/github/stars/StayPirate/opencode-total-session-cost.svg?style=flat&logo=github&color=007ec6)](https://github.com/StayPirate/opencode-total-session-cost/stargazers)
+
 A real-time, lightweight plugin for [Opencode](https://opencode.im) that tracks and displays the **actual cumulative cost** of your active session, including all background tasks, sub-agents, and child sessions.
 
 ## Why this plugin?
