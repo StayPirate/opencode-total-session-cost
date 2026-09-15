@@ -23,7 +23,7 @@ export const SessionCostPlugin: TuiPlugin = async (api) => {
         sessionCost = sessionObj.cost;
         if (currID === sessionID) {
           parentCost += sessionCost;
-        } else if (sessionObj.agent === "explore") {
+        } else if (sessionObj.agent === "explore" || sessionObj.agent === "general") {
           taskCost += sessionCost;
         } else {
           subagentCost += sessionCost;
