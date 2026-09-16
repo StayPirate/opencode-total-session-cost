@@ -40,26 +40,13 @@ const createDeps = (api: TuiPluginApi): CostDeps => ({
 export const SessionCostPlugin: TuiPlugin = async (api) => {
   const showCostBreakdown = async (sessionID: string) => {
     const breakdown = await collectCosts(sessionID, createDeps(api));
-    const message = formatBreakdown(breakdown);
 
-    try {
-      api.ui.dialog.replace(() => (
-        <api.ui.Dialog size="large" onClose={() => api.ui.dialog.clear()}>
-          <box flexDirection="column" padding={1} gap={1}>
-            <text fg={api.theme.current.primary}>Session Costs Breakdown</text>
-            <text fg={api.theme.current.text}>{message}</text>
-          </box>
-        </api.ui.Dialog>
-      ));
-    } catch (error) {
-      console.error(`[${id}] failed to open breakdown dialog`, error);
-      api.ui.toast({
-        title: "Session Costs Breakdown",
-        message,
-        variant: "success",
-        duration: 10000
-      });
-    }
+    api.ui.toast({
+      title: "Session Costs Breakdown",
+      message: formatBreakdown(breakdown),
+      variant: "success",
+      duration: 10000
+    });
   };
 
   api.slots?.register({
