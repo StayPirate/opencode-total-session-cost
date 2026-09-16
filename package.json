@@ -8,6 +8,21 @@
     ".": "./index.ts",
     "./tui": "./tui.tsx"
   },
+  "files": [
+    "cost.ts",
+    "index.ts",
+    "tui.tsx",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --test",
+    "prepublishOnly": "npm run typecheck && npm test"
+  },
+  "engines": {
+    "node": ">=22"
+  },
   "keywords": [
     "opencode-plugin",
     "opencode",
