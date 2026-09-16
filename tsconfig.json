@@ -6,10 +6,12 @@
     "jsx": "preserve",
     "jsxImportSource": "@opentui/solid",
     "strict": true,
-    "declaration": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
+    "types": ["node"],
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["./index.ts", "./tui.tsx"]
+  "include": ["./index.ts", "./tui.tsx", "./cost.ts", "./cost.test.ts"]
 }
