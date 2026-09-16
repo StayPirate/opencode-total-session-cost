@@ -23,6 +23,9 @@
   "engines": {
     "node": ">=22"
   },
+  "overrides": {
+    "@babel/core": "^7.29.7"
+  },
   "keywords": [
     "opencode-plugin",
     "opencode",
