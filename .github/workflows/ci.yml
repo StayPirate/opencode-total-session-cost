@@ -6,22 +6,30 @@ on:
   pull_request:
     branches: [ main ]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  typecheck:
-    name: TypeScript Typecheck
+  verify:
+    name: Typecheck & Test
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v6
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
         with:
-          bun-version: latest
+          node-version: 24
+          cache: npm
 
       - name: Install Dependencies
-        run: bun install --frozen-lockfile
+        run: npm ci
 
-      - name: Run Typecheck
-        run: bun x tsc --noEmit
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
