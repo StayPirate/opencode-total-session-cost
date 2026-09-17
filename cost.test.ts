@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   collectCosts,
+  computeSessionTreeTotals,
   formatBreakdown,
   formatModelSection,
   formatSessionSection,
@@ -153,4 +154,48 @@ test("formats a full breakdown with both sections", () => {
 
   assert.match(output, /By session/);
   assert.match(output, /By provider\/model/);
+});
+
+test("computes a recursive total for every session", () => {
+  const totals = computeSessionTreeTotals([
+    { id: "root", cost: 1 },
+    { id: "child", cost: 2, parentID: "root" },
+    { id: "grandchild", cost: 3, parentID: "child" },
+    { id: "sibling", cost: 4, parentID: "root" }
+  ]);
+
+  assert.equal(totals.get("root"), 10);
+  assert.equal(totals.get("child"), 5);
+  assert.equal(totals.get("grandchild"), 3);
+  assert.equal(totals.get("sibling"), 4);
+});
+
+test("treats sessions with unknown parents as roots", () => {
+  const totals = computeSessionTreeTotals([
+    { id: "orphan", cost: 2, parentID: "missing" },
+    { id: "child", cost: 1, parentID: "orphan" }
+  ]);
+
+  assert.equal(totals.get("orphan"), 3);
+  assert.equal(totals.get("child"), 1);
+});
+
+test("treats missing costs as zero", () => {
+  const totals = computeSessionTreeTotals([
+    { id: "root" },
+    { id: "child", parentID: "root" }
+  ]);
+
+  assert.equal(totals.get("root"), 0);
+  assert.equal(totals.get("child"), 0);
+});
+
+test("does not recurse forever on cyclic parents", () => {
+  const totals = computeSessionTreeTotals([
+    { id: "a", cost: 1, parentID: "b" },
+    { id: "b", cost: 2, parentID: "a" }
+  ]);
+
+  assert.equal(typeof totals.get("a"), "number");
+  assert.equal(typeof totals.get("b"), "number");
 });

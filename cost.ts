@@ -2,6 +2,11 @@ export type SessionLike = {
   id: string;
   cost?: number;
   agent?: string;
+  parentID?: string;
+  title?: string;
+  time?: {
+    updated?: number;
+  };
   model?: {
     providerID?: string;
     id?: string;
@@ -97,6 +102,58 @@ export async function collectCosts(rootSessionID: string, deps: CostDeps): Promi
 
   const total = sessions.parent + sessions.task + sessions.subagent;
   return { sessions, models, total };
+}
+
+/**
+ * Totals every session's cost including all of its descendants.
+ *
+ * Sessions without a `parentID` (or whose parent is not part of the provided
+ * list) are treated as roots. The returned map contains an entry for every
+ * input session, keyed by session id.
+ */
+export function computeSessionTreeTotals(
+  sessions: readonly SessionLike[]
+): Map<string, number> {
+  const byID = new Map<string, SessionLike>();
+  for (const session of sessions) {
+    byID.set(session.id, session);
+  }
+
+  const children = new Map<string, string[]>();
+  for (const session of sessions) {
+    if (!session.parentID || !byID.has(session.parentID)) continue;
+    const list = children.get(session.parentID);
+    if (list) {
+      list.push(session.id);
+    } else {
+      children.set(session.parentID, [session.id]);
+    }
+  }
+
+  const totals = new Map<string, number>();
+  const visiting = new Set<string>();
+
+  const sum = (id: string): number => {
+    const cached = totals.get(id);
+    if (cached !== undefined) return cached;
+    if (visiting.has(id)) return 0;
+
+    visiting.add(id);
+    let total = byID.get(id)?.cost ?? 0;
+    for (const childID of children.get(id) ?? []) {
+      total += sum(childID);
+    }
+    visiting.delete(id);
+
+    totals.set(id, total);
+    return total;
+  };
+
+  for (const session of sessions) {
+    sum(session.id);
+  }
+
+  return totals;
 }
 
 export function formatSessionSection(sessions: SessionCosts): string {
