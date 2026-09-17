@@ -11,10 +11,11 @@ import { useKeyboard, useTerminalDimensions } from "@opentui/solid";
 import { createEffect, createSignal, For, onCleanup, Show } from "solid-js";
 import {
   collectCosts,
-  computeSessionTreeTotals,
   formatBreakdown,
+  groupSessionsByDay,
   type CostDeps,
   type MessageLike,
+  type SessionGroup,
   type SessionLike
 } from "./cost.ts";
 
@@ -23,19 +24,6 @@ export const id = "opencode-total-session-cost";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const LIST_DAYS = 7;
 const LIST_LIMIT = 500;
-
-type CostListSession = {
-  id: string;
-  title: string;
-  total: number;
-  selection: number;
-};
-
-type CostListGroup = {
-  label: string;
-  total: number;
-  sessions: CostListSession[];
-};
 
 const toMessageLike = (message: Message): MessageLike => {
   if (message.role === "assistant") {
@@ -61,47 +49,6 @@ const toSessionLike = (session: Session): SessionLike => ({
     : undefined
 });
 
-const buildSessionGroups = (
-  sessions: readonly SessionLike[],
-  now: number
-): CostListGroup[] => {
-  const totals = computeSessionTreeTotals(sessions);
-  const cutoff = now - LIST_DAYS * DAY_MS;
-  const today = new Date(now).toDateString();
-
-  const roots = sessions
-    .filter((session) => !session.parentID)
-    .filter((session) => (session.time?.updated ?? 0) >= cutoff)
-    .sort((a, b) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0));
-
-  const groups = new Map<string, CostListGroup>();
-  let selection = 0;
-
-  for (const session of roots) {
-    const updated = session.time?.updated ?? now;
-    const key = new Date(updated).toDateString();
-    const label = key === today ? "Today" : key;
-
-    let group = groups.get(key);
-    if (!group) {
-      group = { label, total: 0, sessions: [] };
-      groups.set(key, group);
-    }
-
-    const total = totals.get(session.id) ?? 0;
-    group.total += total;
-    group.sessions.push({
-      id: session.id,
-      title: session.title ?? "Untitled",
-      total,
-      selection: selection
-    });
-    selection += 1;
-  }
-
-  return [...groups.values()];
-};
-
 const createDeps = (api: TuiPluginApi): CostDeps => ({
   getSession: (sessionID) => api.state.session.get(sessionID),
   getMessages: (sessionID) => api.state.session.messages(sessionID).map(toMessageLike),
@@ -118,7 +65,7 @@ const createDeps = (api: TuiPluginApi): CostDeps => ({
 
 const SessionCostList = (props: {
   api: TuiPluginApi;
-  groups: CostListGroup[];
+  groups: SessionGroup[];
   current?: string;
   onSelect: (sessionID: string) => void;
 }) => {
@@ -255,9 +202,13 @@ export const SessionCostPlugin: TuiPlugin = async (api) => {
   };
 
   const openSessionsCostList = async () => {
+    const now = Date.now();
     let sessions: SessionLike[];
     try {
-      const result = await api.client.session.list({ limit: LIST_LIMIT });
+      const result = await api.client.session.list({
+        start: now - LIST_DAYS * DAY_MS,
+        limit: LIST_LIMIT
+      });
       sessions = (result.data ?? []).map(toSessionLike);
     } catch (error) {
       console.error(`[${id}] failed to load sessions for the cost list`, error);
@@ -270,7 +221,7 @@ export const SessionCostPlugin: TuiPlugin = async (api) => {
       return;
     }
 
-    const groups = buildSessionGroups(sessions, Date.now());
+    const groups = groupSessionsByDay(sessions, now, LIST_DAYS);
     const current = api.route.current;
     const currentSessionID =
       current &&
@@ -350,51 +301,51 @@ export const SessionCostPlugin: TuiPlugin = async (api) => {
     }
   });
 
-  api.command?.register(() => [
-    {
-      title: "Total Session Cost",
-      value: "total_cost",
-      description: "Display total cost breakdown of current session and child sessions",
-      category: "Cost Tracking",
-      slash: {
+  api.keymap.registerLayer({
+    commands: [
+      {
         name: "total_cost",
-        aliases: ["costs"]
-      },
-      onSelect: async () => {
-        const currentSessionID =
-          api.route.current &&
-          api.route.current.name === "session" &&
-          typeof api.route.current.params?.sessionID === "string"
-            ? api.route.current.params.sessionID
-            : null;
+        title: "Total Session Cost",
+        desc: "Display total cost breakdown of current session and child sessions",
+        category: "Cost Tracking",
+        namespace: "palette",
+        slashName: "total_cost",
+        slashAliases: ["costs"],
+        run: async () => {
+          const currentSessionID =
+            api.route.current &&
+            api.route.current.name === "session" &&
+            typeof api.route.current.params?.sessionID === "string"
+              ? api.route.current.params.sessionID
+              : null;
 
-        if (!currentSessionID) {
-          api.ui.toast({
-            title: "No Active Session",
-            message: "Please open a session to check costs.",
-            variant: "warning",
-            duration: 4000
-          });
-          return;
+          if (!currentSessionID) {
+            api.ui.toast({
+              title: "No Active Session",
+              message: "Please open a session to check costs.",
+              variant: "warning",
+              duration: 4000
+            });
+            return;
+          }
+
+          await showCostBreakdown(currentSessionID);
         }
-
-        await showCostBreakdown(currentSessionID);
-      }
-    },
-    {
-      title: "Session Costs List",
-      value: "sessions_cost",
-      description: "Show the last 7 days of sessions grouped by day with total costs",
-      category: "Cost Tracking",
-      slash: {
-        name: "sessions_cost",
-        aliases: ["session_costs"]
       },
-      onSelect: async () => {
-        await openSessionsCostList();
+      {
+        name: "sessions_cost",
+        title: "Session Costs List",
+        desc: "Show the last 7 days of sessions grouped by day with total costs",
+        category: "Cost Tracking",
+        namespace: "palette",
+        slashName: "sessions_cost",
+        slashAliases: ["session_costs"],
+        run: async () => {
+          await openSessionsCostList();
+        }
       }
-    }
-  ]);
+    ]
+  });
 };
 
 export const tui = SessionCostPlugin;

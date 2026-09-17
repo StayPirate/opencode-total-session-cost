@@ -51,12 +51,14 @@
   },
   "peerDependencies": {
     "@opentui/core": ">=0.1.97",
+    "@opentui/keymap": ">=0.4.5",
     "@opentui/solid": ">=0.1.97",
     "solid-js": "^1.9.12"
   },
   "devDependencies": {
     "typescript": "^7.0.2",
     "solid-js": "^1.9.12",
+    "@opentui/keymap": "^0.5.11",
     "@types/node": "^26.5.1"
   }
 }
