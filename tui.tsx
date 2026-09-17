@@ -6,7 +6,7 @@ import type {
   TuiSlotContext
 } from "@opencode-ai/plugin/tui";
 import type { Message, Session } from "@opencode-ai/sdk/v2";
-import type { Renderable, ScrollBoxRenderable } from "@opentui/core";
+import { MouseButton, type Renderable, type ScrollBoxRenderable } from "@opentui/core";
 import { useKeyboard, useTerminalDimensions } from "@opentui/solid";
 import { createEffect, createSignal, For, onCleanup, Show } from "solid-js";
 import {
@@ -336,8 +336,10 @@ export const SessionCostPlugin: TuiPlugin = async (api) => {
           <text
             fg={ctx.theme.current.textMuted}
             onMouseUp={(event) => {
-              if (event.button === 0) {
+              if (event.button === MouseButton.LEFT) {
                 void showCostBreakdown(props.session_id);
+              } else if (event.button === MouseButton.RIGHT) {
+                void openSessionsCostList();
               }
             }}
           >

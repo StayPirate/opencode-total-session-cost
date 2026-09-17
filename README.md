@@ -22,7 +22,7 @@ Without tracking these sub-sessions, you might see a main session cost of a few 
 - **Detailed Cost Breakdown**: Offers a `/total_cost` slash command to show a detailed popup separating your active session cost from child task and sub-agent costs.
 - **Session List Cost View**: Offers a `/sessions_cost` command that opens a dialog with the sessions of the last 7 days grouped by day, showing the total cost (including sub-agents) of each session and of each day.
 - **Provider & Model Breakdown**: Displays the exact costs accumulated per model across all session hierarchy levels.
-- **Mouse Click Interaction**: Left-clicking on the cost bar in the prompt header right panel triggers the same detailed breakdown popup.
+- **Mouse Click Interaction**: Left-clicking on the cost bar in the prompt header right panel triggers the same detailed breakdown popup, while right-clicking opens the session costs list.
 
 ## Installation
 Install it globally with:
