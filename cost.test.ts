@@ -6,10 +6,13 @@ import {
   formatBreakdown,
   formatModelSection,
   formatSessionSection,
+  groupSessionsByDay,
   type CostDeps,
   type MessageLike,
   type SessionLike
 } from "./cost.ts";
+
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 type DepsOptions = {
   sessions: Record<string, SessionLike>;
@@ -199,3 +202,56 @@ test("does not recurse forever on cyclic parents", () => {
   assert.equal(typeof totals.get("a"), "number");
   assert.equal(typeof totals.get("b"), "number");
 });
+
+test("groups recent root sessions by day and sums recursive totals", () => {
+  const now = Date.UTC(2026, 8, 17, 12, 0, 0);
+  const recentlyUpdated = now - 60_000;
+  const olderUpdated = now - 2 * DAY_MS;
+
+  const groups = groupSessionsByDay(
+    [
+      { id: "today-root", cost: 1, time: { updated: recentlyUpdated } },
+      {
+        id: "today-child",
+        cost: 2,
+        parentID: "today-root",
+        time: { updated: recentlyUpdated }
+      },
+      { id: "older-root", cost: 3, time: { updated: olderUpdated } },
+      { id: "too-old", cost: 9, time: { updated: now - 8 * DAY_MS } }
+    ],
+    now,
+    7
+  );
+
+  assert.equal(groups.length, 2);
+  assert.equal(groups[0].label, "Today");
+  assert.equal(groups[0].total, 3);
+  assert.equal(groups[0].sessions[0].id, "today-root");
+  assert.equal(groups[0].sessions[0].title, "Untitled");
+  assert.equal(groups[0].sessions[0].total, 3);
+  assert.equal(groups[0].sessions[0].selection, 0);
+
+  assert.equal(groups[1].label, new Date(olderUpdated).toDateString());
+  assert.equal(groups[1].total, 3);
+  assert.equal(groups[1].sessions[0].selection, 1);
+});
+
+test("orders sessions within a day by most recently updated", () => {
+  const now = Date.UTC(2026, 8, 17, 12, 0, 0);
+  const groups = groupSessionsByDay(
+    [
+      { id: "first", cost: 1, time: { updated: now - 60_000 } },
+      { id: "second", cost: 1, time: { updated: now - 30_000 } }
+    ],
+    now,
+    7
+  );
+
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].sessions[0].id, "second");
+  assert.equal(groups[0].sessions[0].selection, 0);
+  assert.equal(groups[0].sessions[1].id, "first");
+  assert.equal(groups[0].sessions[1].selection, 1);
+});
+

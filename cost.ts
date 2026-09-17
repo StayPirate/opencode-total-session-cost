@@ -38,6 +38,21 @@ export type CostBreakdown = {
   total: number;
 };
 
+export type SessionGroupSession = {
+  id: string;
+  title: string;
+  total: number;
+  selection: number;
+};
+
+export type SessionGroup = {
+  label: string;
+  total: number;
+  sessions: SessionGroupSession[];
+};
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
 /**
  * Agents that OpenCode spawns through the Task tool. Their sessions are
  * reported under the "Task" category in the breakdown.
@@ -154,6 +169,56 @@ export function computeSessionTreeTotals(
   }
 
   return totals;
+}
+
+/**
+ * Groups the root sessions updated within the last `days` days by calendar day.
+ *
+ * Sessions are ordered by most recently updated first and days keep that order.
+ * Each group carries the recursive total of all its sessions, while every
+ * session carries its own recursive total and its position in the flat
+ * selection order.
+ */
+export function groupSessionsByDay(
+  sessions: readonly SessionLike[],
+  now: number,
+  days: number
+): SessionGroup[] {
+  const totals = computeSessionTreeTotals(sessions);
+  const cutoff = now - days * MS_PER_DAY;
+  const today = new Date(now).toDateString();
+
+  const roots = sessions
+    .filter((session) => !session.parentID)
+    .filter((session) => (session.time?.updated ?? 0) >= cutoff)
+    .sort((a, b) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0));
+
+  const groups = new Map<string, SessionGroup>();
+  let selection = 0;
+
+  for (const session of roots) {
+    const updated = session.time?.updated ?? now;
+    const key = new Date(updated).toDateString();
+    const label = key === today ? "Today" : key;
+
+    let group = groups.get(key);
+    if (!group) {
+      group = { label, total: 0, sessions: [] };
+      groups.set(key, group);
+    }
+
+    const total = totals.get(session.id) ?? 0;
+    group.total += total;
+    group.sessions.push({
+      id: session.id,
+      title: session.title ?? "Untitled",
+      total,
+      selection
+    });
+    selection += 1;
+  }
+
+  return [...groups.values()];
 }
 
 export function formatSessionSection(sessions: SessionCosts): string {
