@@ -8,6 +8,7 @@ import {
   formatSessionSection,
   groupSessionsByDay,
   type CostDeps,
+  type DurableEventLike,
   type MessageLike,
   type SessionLike
 } from "./cost.ts";
@@ -18,13 +19,36 @@ type DepsOptions = {
   sessions: Record<string, SessionLike>;
   children?: Record<string, string[]>;
   messages?: Record<string, MessageLike[]>;
+  events?: Record<string, DurableEventLike[]>;
 };
 
-const createDeps = ({ sessions, children = {}, messages = {} }: DepsOptions): CostDeps => ({
-  getSession: (id) => sessions[id],
-  getChildren: async (id) => (children[id] ?? []).map((childID) => sessions[childID]),
-  getMessages: (id) => messages[id] ?? []
+const createDeps = ({ sessions, children = {}, messages = {}, events }: DepsOptions): CostDeps => {
+  const deps: CostDeps = {
+    getSession: (id) => sessions[id],
+    getChildren: async (id) => (children[id] ?? []).map((childID) => sessions[childID]),
+    getMessages: (id) => messages[id] ?? []
+  };
+  if (events) {
+    deps.getEvents = async (id) => events[id] ?? [];
+  }
+  return deps;
+};
+
+const stepStarted = (
+  assistantMessageID: string,
+  providerID: string,
+  id: string
+): DurableEventLike => ({
+  type: "session.next.step.started",
+  data: { assistantMessageID, model: { providerID, id } }
 });
+
+const stepEnded = (assistantMessageID: string, cost: number): DurableEventLike => ({
+  type: "session.next.step.ended",
+  data: { assistantMessageID, cost }
+});
+
+const compaction = (): DurableEventLike => ({ type: "session.next.compaction.ended", data: {} });
 
 test("sums the root and every nested child session", async () => {
   const result = await collectCosts(
@@ -64,7 +88,124 @@ test("classifies task agents separately from other sub-agents", async () => {
   assert.equal(result.total, 8);
 });
 
-test("attributes message costs per provider/model and adds the remainder", async () => {
+test("attributes durable step costs per model across several compactions", async () => {
+  const result = await collectCosts(
+    "root",
+    createDeps({
+      sessions: {
+        root: { id: "root", cost: 10.5, model: { providerID: "google", id: "gemini" } }
+      },
+      events: {
+        root: [
+          stepStarted("m1", "anthropic", "claude"),
+          stepEnded("m1", 4),
+          compaction(),
+          stepStarted("m2", "openai", "gpt"),
+          stepEnded("m2", 6),
+          compaction(),
+          stepStarted("m3", "google", "gemini"),
+          stepEnded("m3", 0.5)
+        ]
+      }
+    })
+  );
+
+  assert.equal(result.models["anthropic/claude"], 4);
+  assert.equal(result.models["openai/gpt"], 6);
+  assert.equal(result.models["google/gemini"], 0.5);
+  assert.equal(result.total, 10.5);
+});
+
+test("keeps per-step model attribution within one assistant message", async () => {
+  const result = await collectCosts(
+    "root",
+    createDeps({
+      sessions: { root: { id: "root", cost: 3 } },
+      events: {
+        root: [
+          stepStarted("m1", "anthropic", "claude"),
+          stepEnded("m1", 1),
+          stepStarted("m1", "openai", "gpt"),
+          stepEnded("m1", 2)
+        ]
+      }
+    })
+  );
+
+  assert.equal(result.models["anthropic/claude"], 1);
+  assert.equal(result.models["openai/gpt"], 2);
+});
+
+test("distributes an unattributed remainder across the observed models", async () => {
+  const result = await collectCosts(
+    "root",
+    createDeps({
+      sessions: {
+        root: { id: "root", cost: 12, model: { providerID: "google", id: "gemini" } }
+      },
+      events: {
+        root: [
+          stepStarted("m1", "anthropic", "claude"),
+          stepEnded("m1", 6),
+          stepStarted("m2", "openai", "gpt"),
+          stepEnded("m2", 2)
+        ]
+      }
+    })
+  );
+
+  assert.equal(result.models["anthropic/claude"], 9);
+  assert.equal(result.models["openai/gpt"], 3);
+  assert.equal(result.models["google/gemini"], undefined);
+  assert.equal(result.total, 12);
+});
+
+test("attributes steps without a matching start to an unknown model", async () => {
+  const result = await collectCosts(
+    "root",
+    createDeps({
+      sessions: { root: { id: "root", cost: 3, model: { providerID: "openai", id: "gpt" } } },
+      events: { root: [stepEnded("missing", 3)] }
+    })
+  );
+
+  assert.equal(result.models["unknown/unknown"], 3);
+});
+
+test("prefers durable events over projected messages", async () => {
+  const result = await collectCosts(
+    "root",
+    createDeps({
+      sessions: { root: { id: "root", cost: 5, model: { providerID: "openai", id: "gpt" } } },
+      events: { root: [stepStarted("m1", "anthropic", "claude"), stepEnded("m1", 5)] },
+      messages: {
+        root: [{ role: "assistant", cost: 5, providerID: "openai", modelID: "gpt" }]
+      }
+    })
+  );
+
+  assert.deepEqual(result.models, { "anthropic/claude": 5 });
+});
+
+test("skips model attribution when models are disabled", async () => {
+  let eventsCalled = false;
+  const deps = createDeps({
+    sessions: { root: { id: "root", cost: 5 } },
+    events: { root: [stepStarted("m1", "anthropic", "claude"), stepEnded("m1", 5)] }
+  });
+  deps.getEvents = async (id) => {
+    eventsCalled = true;
+    return [{ type: "session.next.step.ended", data: { assistantMessageID: id, cost: 5 } }];
+  };
+
+  const result = await collectCosts("root", deps, { models: false });
+
+  assert.deepEqual(result.models, {});
+  assert.equal(result.total, 5);
+  assert.equal(eventsCalled, false);
+});
+
+test("attributes message costs per provider/model and spreads the remainder", async () => {
   const result = await collectCosts(
     "root",
     createDeps({
@@ -85,8 +226,9 @@ test("attributes message costs per provider/model and adds the remainder", async
     })
   );
 
-  assert.equal(result.models["openai/gpt"], 7);
-  assert.equal(result.models["anthropic/claude"], 3);
+  // The 3 of unaccounted cost follow the only observed model, not the session model.
+  assert.equal(result.models["openai/gpt"], 10);
+  assert.equal(result.models["anthropic/claude"], undefined);
   assert.equal(result.total, 10);
 });
 
@@ -254,4 +396,3 @@ test("orders sessions within a day by most recently updated", () => {
   assert.equal(groups[0].sessions[1].id, "first");
   assert.equal(groups[0].sessions[1].selection, 1);
 });
-

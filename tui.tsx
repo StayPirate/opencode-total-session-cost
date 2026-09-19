@@ -14,6 +14,7 @@ import {
   formatBreakdown,
   groupSessionsByDay,
   type CostDeps,
+  type DurableEventLike,
   type MessageLike,
   type SessionGroup,
   type SessionLike
@@ -24,6 +25,10 @@ export const id = "opencode-total-session-cost";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const LIST_DAYS = 7;
 const LIST_LIMIT = 500;
+const MESSAGE_PAGE_SIZE = 200;
+const MAX_MESSAGE_PAGES = 100;
+const EVENT_PAGE_SIZE = 200;
+const MAX_EVENT_PAGES = 100;
 
 const toMessageLike = (message: Message): MessageLike => {
   if (message.role === "assistant") {
@@ -49,9 +54,86 @@ const toSessionLike = (session: Session): SessionLike => ({
     : undefined
 });
 
+const collectMessages = async (api: TuiPluginApi, sessionID: string): Promise<MessageLike[]> => {
+  const messages: MessageLike[] = [];
+  const seen = new Set<string>();
+  let before: string | undefined;
+
+  for (let page = 0; page < MAX_MESSAGE_PAGES; page += 1) {
+    const params: { sessionID: string; limit: number; before?: string } = {
+      sessionID,
+      limit: MESSAGE_PAGE_SIZE
+    };
+    if (before) params.before = before;
+
+    const res = await api.client.session.messages(params);
+    const data = res.data ?? [];
+    const fresh = data.filter((item) => !seen.has(item.info.id));
+    if (fresh.length === 0) break;
+
+    for (const item of fresh) {
+      seen.add(item.info.id);
+      messages.push(toMessageLike(item.info));
+    }
+
+    let earliest = data[0]?.info.id;
+    for (const item of data) {
+      if (earliest === undefined || item.info.id < earliest) earliest = item.info.id;
+    }
+    if (!earliest || earliest === before) break;
+    before = earliest;
+  }
+
+  return messages;
+};
+
+const collectDurableEvents = async (
+  api: TuiPluginApi,
+  sessionID: string
+): Promise<DurableEventLike[]> => {
+  const events: DurableEventLike[] = [];
+  let after: number | undefined;
+
+  for (let page = 0; page < MAX_EVENT_PAGES; page += 1) {
+    const params: { sessionID: string; limit: number; after?: number } = {
+      sessionID,
+      limit: EVENT_PAGE_SIZE
+    };
+    if (after !== undefined) params.after = after;
+
+    const res = await api.client.v2.session.history(params);
+    const data = res.data;
+    if (!data) break;
+
+    events.push(...data.data);
+    if (!data.hasMore) break;
+
+    const seq = data.data[data.data.length - 1]?.durable?.seq;
+    if (typeof seq !== "number" || seq === after) break;
+    after = seq;
+  }
+
+  return events;
+};
+
 const createDeps = (api: TuiPluginApi): CostDeps => ({
   getSession: (sessionID) => api.state.session.get(sessionID),
-  getMessages: (sessionID) => api.state.session.messages(sessionID).map(toMessageLike),
+  getMessages: async (sessionID) => {
+    try {
+      return await collectMessages(api, sessionID);
+    } catch (error) {
+      console.error(`[${id}] failed to load messages of session ${sessionID}`, error);
+      return api.state.session.messages(sessionID).map(toMessageLike);
+    }
+  },
+  getEvents: async (sessionID) => {
+    try {
+      return await collectDurableEvents(api, sessionID);
+    } catch (error) {
+      console.error(`[${id}] failed to load durable events of session ${sessionID}`, error);
+      return [];
+    }
+  },
   getChildren: async (sessionID) => {
     try {
       const res = await api.client.session.children({ sessionID });
@@ -261,7 +343,7 @@ export const SessionCostPlugin: TuiPlugin = async (api) => {
             return;
           }
 
-          const breakdown = await collectCosts(sessionID, createDeps(api));
+          const breakdown = await collectCosts(sessionID, createDeps(api), { models: false });
           if (currentRequest !== requestId) return;
 
           setTotal(breakdown.total);

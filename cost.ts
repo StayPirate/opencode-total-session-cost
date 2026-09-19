@@ -20,10 +20,36 @@ export type MessageLike = {
   modelID?: string;
 };
 
+/**
+ * The subset of an OpenCode durable session event needed to attribute cost.
+ *
+ * `session.next.step.started` carries the model that produced a step,
+ * `session.next.step.ended` carries its cost. Both are keyed by the assistant
+ * message id, and both survive compaction and revert because they live in the
+ * durable event log rather than in the (prunable) projected messages.
+ */
+export type DurableEventLike = {
+  type?: string;
+  durable?: {
+    seq?: number;
+  };
+  data?: {
+    timestamp?: number;
+    sessionID?: string;
+    assistantMessageID?: string;
+    cost?: number;
+    model?: {
+      id?: string;
+      providerID?: string;
+    };
+  };
+};
+
 export type CostDeps = {
   getSession: (sessionID: string) => SessionLike | undefined;
   getChildren: (sessionID: string) => Promise<readonly SessionLike[]>;
-  getMessages: (sessionID: string) => readonly MessageLike[];
+  getMessages: (sessionID: string) => readonly MessageLike[] | Promise<readonly MessageLike[]>;
+  getEvents?: (sessionID: string) => Promise<readonly DurableEventLike[]>;
 };
 
 export type SessionCosts = {
@@ -36,6 +62,15 @@ export type CostBreakdown = {
   sessions: SessionCosts;
   models: Record<string, number>;
   total: number;
+};
+
+export type CollectCostsOptions = {
+  /**
+   * When false the per-model breakdown is skipped entirely. The session totals
+   * come from `session.cost` alone, so a live indicator can read the total
+   * without paying for event/message history.
+   */
+  models?: boolean;
 };
 
 export type SessionGroupSession = {
@@ -61,15 +96,107 @@ export const TASK_AGENTS: ReadonlySet<string> = new Set(["explore", "general"]);
 
 const EPSILON = 0.0001;
 
-export async function collectCosts(rootSessionID: string, deps: CostDeps): Promise<CostBreakdown> {
+const STEP_STARTED = "session.next.step.started";
+const STEP_ENDED = "session.next.step.ended";
+const UNKNOWN_MODEL = "unknown/unknown";
+
+const modelKey = (providerID: string | undefined, modelID: string | undefined): string =>
+  `${providerID ?? "unknown"}/${modelID ?? "unknown"}`;
+
+const sumCosts = (models: Record<string, number>): number =>
+  Object.values(models).reduce((total, cost) => total + cost, 0);
+
+/**
+ * Attributes each `session.next.step.ended` cost to the model of the matching
+ * `session.next.step.started`. Steps are matched per assistant message id with a
+ * queue, so several steps of the same message keep their own model.
+ */
+const costsFromEvents = (events: readonly DurableEventLike[]): Record<string, number> => {
+  const models: Record<string, number> = {};
+  const pending = new Map<string, string[]>();
+
+  for (const event of events) {
+    if (event.type === STEP_STARTED) {
+      const messageID = event.data?.assistantMessageID;
+      const model = event.data?.model;
+      if (!messageID || !model) continue;
+      const key = modelKey(model.providerID, model.id);
+      const queue = pending.get(messageID);
+      if (queue) {
+        queue.push(key);
+      } else {
+        pending.set(messageID, [key]);
+      }
+      continue;
+    }
+
+    if (event.type !== STEP_ENDED) continue;
+    const cost = event.data?.cost;
+    if (typeof cost !== "number" || cost <= 0) continue;
+
+    const messageID = event.data?.assistantMessageID;
+    const queue = messageID ? pending.get(messageID) : undefined;
+    const key = queue && queue.length > 0 ? queue.shift()! : UNKNOWN_MODEL;
+    models[key] = (models[key] ?? 0) + cost;
+  }
+
+  return models;
+};
+
+const costsFromMessages = (
+  messages: readonly MessageLike[],
+  session: SessionLike | undefined
+): Record<string, number> => {
+  const models: Record<string, number> = {};
+
+  for (const message of messages) {
+    if (message.role !== "assistant") continue;
+    const cost = message.cost;
+    if (typeof cost !== "number" || cost <= 0) continue;
+
+    const key = modelKey(
+      message.providerID ?? session?.model?.providerID,
+      message.modelID ?? session?.model?.id
+    );
+    models[key] = (models[key] ?? 0) + cost;
+  }
+
+  return models;
+};
+
+/**
+ * Spreads a remainder over the models already observed, proportionally to their
+ * attributed cost. This keeps the model rows summing to the real session total
+ * without dumping hidden spend onto whichever model is currently selected.
+ */
+const applyRemainder = (
+  models: Record<string, number>,
+  remainder: number,
+  session: SessionLike | undefined
+): void => {
+  const entries = Object.entries(models).filter(([, cost]) => cost > 0);
+  const attributed = entries.reduce((total, [, cost]) => total + cost, 0);
+
+  if (attributed > 0) {
+    for (const [key, cost] of entries) {
+      models[key] = cost + remainder * (cost / attributed);
+    }
+    return;
+  }
+
+  const key = modelKey(session?.model?.providerID, session?.model?.id);
+  models[key] = (models[key] ?? 0) + remainder;
+};
+
+export async function collectCosts(
+  rootSessionID: string,
+  deps: CostDeps,
+  options: CollectCostsOptions = {}
+): Promise<CostBreakdown> {
+  const includeModels = options.models !== false;
   const sessions: SessionCosts = { parent: 0, task: 0, subagent: 0 };
   const models: Record<string, number> = {};
   const visited = new Set<string>();
-
-  const addModelCost = (providerID: string, modelID: string, cost: number) => {
-    const key = `${providerID}/${modelID}`;
-    models[key] = (models[key] ?? 0) + cost;
-  };
 
   const walk = async (sessionID: string, fallback?: SessionLike): Promise<void> => {
     if (visited.has(sessionID)) return;
@@ -86,26 +213,27 @@ export async function collectCosts(rootSessionID: string, deps: CostDeps): Promi
       sessions.subagent += sessionCost;
     }
 
-    let attributedCost = 0;
-    for (const message of deps.getMessages(sessionID)) {
-      if (message.role !== "assistant") continue;
-      const cost = message.cost;
-      if (typeof cost !== "number" || cost <= 0) continue;
-      addModelCost(
-        message.providerID ?? session?.model?.providerID ?? "unknown",
-        message.modelID ?? session?.model?.id ?? "unknown",
-        cost
-      );
-      attributedCost += cost;
-    }
+    if (includeModels) {
+      let attributed: Record<string, number> | undefined;
 
-    const remainder = sessionCost - attributedCost;
-    if (remainder > EPSILON) {
-      addModelCost(
-        session?.model?.providerID ?? "unknown",
-        session?.model?.id ?? "unknown",
-        remainder
-      );
+      if (deps.getEvents) {
+        const events = await deps.getEvents(sessionID);
+        const fromEvents = costsFromEvents(events);
+        if (sumCosts(fromEvents) > 0) attributed = fromEvents;
+      }
+
+      if (!attributed) {
+        attributed = costsFromMessages(await deps.getMessages(sessionID), session);
+      }
+
+      const remainder = sessionCost - sumCosts(attributed);
+      if (remainder > EPSILON) {
+        applyRemainder(attributed, remainder, session);
+      }
+
+      for (const [key, cost] of Object.entries(attributed)) {
+        models[key] = (models[key] ?? 0) + cost;
+      }
     }
 
     for (const child of await deps.getChildren(sessionID)) {
